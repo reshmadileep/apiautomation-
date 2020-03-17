@@ -1,13 +1,14 @@
 import cx_Oracle
+import platform
+import os
 
 LOCATION = r"C:\oracle\instantclient_19_5"
 
-
-# print("ARCH:", platform.architecture())
-# print("FILES AT LOCATION:")
-# for name in os.listdir(LOCATION):
-# print(name)
-# os.environ["PATH"] = LOCATION + ";" + os.environ["PATH"]
+#print("ARCH:", platform.architecture())
+#print("FILES AT LOCATION:")
+for name in os.listdir(LOCATION):
+#	print(name)
+	os.environ["PATH"] = LOCATION + ";" + os.environ["PATH"]
 
 def connect_to_db(db_host_name, db_port, service_name, username, password):
     dsn_tns = cx_Oracle.makedsn(db_host_name, db_port, service_name=service_name)
@@ -37,3 +38,5 @@ def db_objects_create_backup(local_path_to_create_file, conn):
             create_temp_file_with_query(local_path_to_create_file, "Error in sql execution " + str(e), "Error_log.txt")
     main_cur.close()
     inner_cur.close()
+
+
