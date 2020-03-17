@@ -358,6 +358,7 @@ def create_folders(client, changerequest_name, svn_cr_folder):
         return
     path = '/deployment/' + changerequest_name
     delete_existing_remote_folder(path)
+    execute_ssh_command(ssh, 'mkdir ' + path)
     execute_ssh_command(ssh, 'mkdir ' + path + '/environment_backup')
     sub_directories = [x[0] for x in os.walk(svn_cr_folder)]
     list_of_folders_with_files = []
