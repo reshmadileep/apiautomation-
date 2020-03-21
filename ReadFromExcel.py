@@ -6,7 +6,7 @@ from datetime import datetime
 from Database_Tasks import connect_to_db, disconnect_from_db, db_objects_create_backup
 import shutil
 
-# import config_PRE as config
+import config_PRE as config
 
 # Importing the config based on environment to run
 if os.getenv("ENV_TO_DEPLOY") == 'SIT':
@@ -255,16 +255,16 @@ def remove_temp_files_created_previously(svn_cr_folder):
     if os.path.exists(svn_cr_folder + "\\environment_backup"):
         shutil.rmtree(svn_cr_folder + "\\environment_backup")
     # dj_rms_scripts file if any created from previous run
-    if os.path.exists(svn_cr_folder+"\\dj_rms_scripts.sql"):
+    if os.path.exists(svn_cr_folder + "\\dj_rms_scripts.sql"):
         os.remove(svn_cr_folder + "\\dj_rms_scripts.sql")
     # oracle_rms_scripts file if any created from previous run
-    if os.path.exists(svn_cr_folder+"\\oracle_rms_scripts.sql"):
+    if os.path.exists(svn_cr_folder + "\\oracle_rms_scripts.sql"):
         os.remove(svn_cr_folder + "\\oracle_rms_scripts.sql")
     # dj_sim_scripts file if any created from previous run
-    if os.path.exists(svn_cr_folder+"\\dj_sim_scripts.sql"):
+    if os.path.exists(svn_cr_folder + "\\dj_sim_scripts.sql"):
         os.remove(svn_cr_folder + "\\dj_sim_scripts.sql")
     # dj_ait_scripts file if any created from previous run
-    if os.path.exists(svn_cr_folder+"\\dj_ait_scripts.sql"):
+    if os.path.exists(svn_cr_folder + "\\dj_ait_scripts.sql"):
         os.remove(svn_cr_folder + "\\dj_ait_scripts.sql")
 
 
@@ -315,40 +315,46 @@ def check_if_jenkinsfile_contents_exist(data_in_jenkins_file):
     for sheet_name in data_in_jenkins_file.sheet_names:
         if not file_present_in_folder_status:
             break
-        data_in_sheet = data.parse(sheet_name)
+        data_in_sheet = data_in_jenkins_file.parse(sheet_name)
         for index_value, row_value in data_in_sheet.iterrows():
             if not file_present_in_folder_status:
                 break
             if sheet_name != 'APPS':
                 # Checking if db folder files are present for each schema
-                file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(file_present_in_folder_status,
-                                                                                  row_value['Values'],
-                                                                                  svn_cr_folder + "\\db\\" + sheet_name + "\\")
+                file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(
+                    file_present_in_folder_status,
+                    row_value['Values'],
+                    svn_cr_folder + "\\db\\" + sheet_name + "\\")
                 # Checking if db folder rollback files are present for each schema
-                file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(file_present_in_folder_status,
-                                                                                  row_value['Rollback_Details'],
-                                                                                  svn_cr_folder + "\\db\\" + sheet_name + "\\rollback\\")
+                file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(
+                    file_present_in_folder_status,
+                    row_value['Rollback_Details'],
+                    svn_cr_folder + "\\db\\" + sheet_name + "\\rollback\\")
             else:
                 # check if forms are present
                 if 'forms' in row_value['Data_to_Fill']:
-                    file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(file_present_in_folder_status,
-                                                                                      row_value['Values'],
-                                                                                      svn_cr_folder + "\\apps\\forms\\")
+                    file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(
+                        file_present_in_folder_status,
+                        row_value['Values'],
+                        svn_cr_folder + "\\apps\\forms\\")
                 # check if proc are present
                 if 'proc' in row_value['Data_to_Fill']:
-                    file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(file_present_in_folder_status,
-                                                                                      row_value['Values'],
-                                                                                      svn_cr_folder + "\\batch\\proc\\")
+                    file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(
+                        file_present_in_folder_status,
+                        row_value['Values'],
+                        svn_cr_folder + "\\batch\\proc\\")
                 # check if sqldir are present
                 if 'sqldir' in row_value['Data_to_Fill']:
-                    file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(file_present_in_folder_status,
-                                                                                      row_value['Values'],
-                                                                                      svn_cr_folder + "\\batch\\sqldir\\")
+                    file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(
+                        file_present_in_folder_status,
+                        row_value['Values'],
+                        svn_cr_folder + "\\batch\\sqldir\\")
                 # check if scripts are present
                 if 'scripts' in row_value['Data_to_Fill']:
-                    file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(file_present_in_folder_status,
-                                                                                      row_value['Values'],
-                                                                                      svn_cr_folder + "\\batch\\scripts\\")
+                    file_present_in_folder_status = extract_file_names_from_template_file_and_verify_if_files_present(
+                        file_present_in_folder_status,
+                        row_value['Values'],
+                        svn_cr_folder + "\\batch\\scripts\\")
 
     return file_present_in_folder_status
 
@@ -429,7 +435,7 @@ def db_commands_execution_each_row(commands_list, backup_list, execution_path, s
             rollback_dictionary[sheet_name] = {dict_key_value: backup_list}
         output, error = execute_db_commands(ssh, username, password, execution_path, db_query)
         add_to_dictionary(sheet_name, dict_key_value, db_query, executed_commands_dictionary)
-        if "error" in output or 'ERROR' in output:
+        if "Disconnected" not in output:
             success_status = False
             break
     db_scripts_rollback(executed_commands_dictionary, rollback_dictionary, success_status)
@@ -505,8 +511,8 @@ def rollback_performed_in_each_schema(schema, executed_commands_dictionary, roll
     return rollback_success
 
 
-cr_name_list = os.getenv("RMS_CR_IDENTIFIER").split(',')
-# cr_name_list = 'CHG0012345'.split(',')
+# cr_name_list = os.getenv("RMS_CR_IDENTIFIER").split(',')
+cr_name_list = 'CHG0012345'.split(',')
 svn_folder = ".\\svn\\RMS\\"
 svn_trunk_folder = svn_folder + "Trunk\\"
 timestamp = datetime.today().strftime('%Y-%m-%d-%H:%M:%S')
