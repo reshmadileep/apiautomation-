@@ -6,7 +6,7 @@ from datetime import datetime
 from Database_Tasks import connect_to_db, disconnect_from_db, db_objects_create_backup
 import shutil
 
-import config_PRE as config
+#import config_PRE as config
 
 # Importing the config based on environment to run
 if os.getenv("ENV_TO_DEPLOY") == 'SIT':
@@ -555,8 +555,8 @@ def get_path_details_and_expected_output(main_compile_file_path, file_type):
     return comfile_file_path, bin_file_path, expected_output
 
 
-# cr_name_list = os.getenv("RMS_CR_IDENTIFIER").split(',')
-cr_name_list = 'CHG0012345'.split(',')
+cr_name_list = os.getenv("RMS_CR_IDENTIFIER").split(',')
+# cr_name_list = 'CHG0012345'.split(',')
 svn_folder = ".\\svn\\RMS\\"
 svn_trunk_folder = svn_folder + "Trunk\\"
 remote_server_compile_files_path_main_folder = "/app/retek/rms/9.0"
@@ -644,10 +644,10 @@ for cr_name in cr_name_list:
                                                                                dba_invalid_objects_after_scripts_exec)
         if not user_if_invalid_objects_present:
             print("Compiling invalid user objects---------------")
-            #compile_invalid_objects(svn_cr_folder, get_query('COMPILE_USER_OBJECTS'))
+            compile_invalid_objects(svn_cr_folder, get_query('COMPILE_USER_OBJECTS'))
         if not dba_if_invalid_objects_present:
             print("Compiling invalid dba objects---------------")
-            #compile_invalid_objects(svn_cr_folder, get_query('COMPILE_DBA_OBJECTS'))
+            compile_invalid_objects(svn_cr_folder, get_query('COMPILE_DBA_OBJECTS'))
         # Starting compiling of objects in APPS sheet
         print("Compiling of forms/proc begins ------------")
         data_apps_sheet = data.parse('APPS')
