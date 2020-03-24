@@ -6,7 +6,7 @@ from datetime import datetime
 from Database_Tasks import connect_to_db, disconnect_from_db, db_objects_create_backup
 import shutil
 
-# import config_PRE as config
+import config_PRE as config
 
 # Importing the config based on environment to run
 if os.getenv("ENV_TO_DEPLOY") == 'SIT':
@@ -158,6 +158,19 @@ def compile_form(client, compile_file_folder, file_name, compile_file_type):
     return out
 
 
+def compile_reports(client, compile_file_folder, file_name):
+    out, std_error = execute_ssh_commands(client, '''
+                cd {compile_file_folder}
+                chgenv -g djpre sim as
+                comprep -b {file_name}
+                exit
+                '''.format(compile_file_folder=compile_file_folder, file_name=file_name))
+    out = [i.decode() for i in out]
+    out = '\n'.join(out)
+    print(out)
+    return out
+
+
 def compiling_files_steps(file_to_compile, remote_server_compile_files_path, remote_server_bin_files_path,
                           file_to_compile_path, file_ext):
     # Currently supports proc and forms folder
@@ -254,7 +267,6 @@ def rollback_compiled_files(dictionary_of_files_compiled, changerequest_name, sv
                                  timestamp)
 
 
-
 def get_schema_credentials(schema):
     switcher = {
         'DJ_RMS': [config.DJ_RMS['username'], config.DJ_RMS['password']],
@@ -286,7 +298,8 @@ def copy_file_from_local_to_remote(client, local_path, remote_path):
         sftp.close()
         print("copied")
     except Exception as e:
-        print("Restricted unwanted folder copy for path : " + local_path + " as only file copy to be done and not folder.")
+        print(
+            "Restricted unwanted folder copy for path : " + local_path + " as only file copy to be done and not folder.")
 
 
 def delete_existing_remote_folder(path):
@@ -555,10 +568,6 @@ def rollback_performed_in_each_schema(schema, executed_commands_dictionary, roll
                         break
                 else:
                     print("Skipping file " + fail_query + " as file not found in the local SVN-> Trunk.")
-    if rollback_success:
-        print("Deployment Failed. Rollback over successfully.")
-    else:
-        print("Deployment Failed. Rollback also failed.")
     return rollback_success
 
 
@@ -574,13 +583,14 @@ def get_path_details_and_expected_output(main_compile_file_path, file_type):
     return comfile_file_path, bin_file_path, expected_output
 
 
-cr_name_list = os.getenv("RMS_CR_IDENTIFIER").split(',')
-# cr_name_list = 'CHG0012345'.split(',')
+# cr_name_list = os.getenv("RMS_CR_IDENTIFIER").split(',')
+cr_name_list = 'CHG0012345'.split(',')
 svn_folder = ".\\svn\\RMS\\"
 svn_trunk_folder = svn_folder + "Trunk\\"
 remote_server_compile_files_path_main_folder = "/app/retek/rms/9.0"
 timestamp = datetime.today().strftime('%Y-%m-%d-%H:%M:%S')
 db_exec_success_status = True
+jenkins_file_present_status = True
 # Initializing ssh
 ssh = SSHClient()
 ssh.load_system_host_keys()
@@ -596,62 +606,64 @@ for cr_name in cr_name_list:
     cr_db_folder_path = cr_remote_folder_path + '/db/'
     svn_cr_folder = svn_folder + "tags\\" + cr_name
     excel_file = svn_folder + "tags\\" + cr_name + '\\JenkinsTemplateFile.xlsx'
-    data = pd.ExcelFile(excel_file)
-    dict_of_files_compiled[cr_name + "/APPS"] = {}
     # Check if Jenkins Template File Exists
     if not os.path.exists(excel_file):
         db_exec_success_status = False
+        jenkins_file_present_status = False
         print("Jenkins Template File not present in the path " + svn_cr_folder)
-    # Check if files exist as in Jenkins File
-    db_exec_success_status = check_if_jenkinsfile_contents_exist(data, db_exec_success_status)
+    else:
+        data = pd.ExcelFile(excel_file)
+        dict_of_files_compiled[cr_name + "/APPS"] = {}
+        # Check if files exist as in Jenkins File
+        db_exec_success_status = check_if_jenkinsfile_contents_exist(data, jenkins_file_present_status)
     if db_exec_success_status:
         print("All files in Jenkins Template file are present in the required folders.")
-    # Copying files from Jenkins server to remote server. Also remove any files if any created in the previous run
-    remove_temp_files_created_previously(svn_cr_folder)
-    create_folders(ssh, cr_name, svn_cr_folder)
-    # Creating back up of the selected environment
-    create_backup_of_existing_environment(ssh, svn_cr_folder, cr_name)
-    # Storing invalid objects
-    dba_invalid_objects_before_scripts_exec = get_list_of_invalid_objects(svn_cr_folder, get_query('GET_DBA_OBJECTS'))
-    user_invalid_objects_before_scripts_exec = get_list_of_invalid_objects(svn_cr_folder, get_query('GET_USER_OBJECTS'))
-    # Start Db scripts execution
-    print("Execution of db related scripts if any started---------")
-    for sheet in data.sheet_names:
-        if sheet != 'APPS':
-            # Check if any failure in any previous schema scripts execution
-            if db_exec_success_status:
-                print("Execution of scripts if any in " + sheet + " schema started.")
-                rollback_dict[cr_name + "/" + sheet] = {}
-                executed_command_dict[cr_name + "/" + sheet] = {}
-            else:
-                break
-            # If no previous failure detected, proceed with each sheet -> scripts execution
-            path_of_execution = cr_db_folder_path + sheet
-            data_each_sheet = data.parse(sheet)
-            # Adding the username and password
-            username, password = get_schema_credentials(sheet)
-            for index, row in data_each_sheet.iterrows():
-                # Blank or nan values check for DB queries
-                if not pd.isnull(row['Values']) or row['Values'] == '':
-                    db_queries_to_execute = convert_to_list(row['Values'])
-                    if len(db_queries_to_execute) == 0:
-                        continue
-                    if not pd.isnull(row['Rollback_Details']) or row['Rollback_Details'] == '':
-                        rollback_scripts = convert_to_list(row['Rollback_Details'])
-                        if len(rollback_scripts) == 0:
+        # Copying files from Jenkins server to remote server. Also remove any files if any created in the previous run
+        remove_temp_files_created_previously(svn_cr_folder)
+        create_folders(ssh, cr_name, svn_cr_folder)
+        # Creating back up of the selected environment
+        create_backup_of_existing_environment(ssh, svn_cr_folder, cr_name)
+        # Storing invalid objects
+        dba_invalid_objects_before_scripts_exec = get_list_of_invalid_objects(svn_cr_folder, get_query('GET_DBA_OBJECTS'))
+        user_invalid_objects_before_scripts_exec = get_list_of_invalid_objects(svn_cr_folder, get_query('GET_USER_OBJECTS'))
+        # Start Db scripts execution
+        print("Execution of db related scripts if any started---------")
+        for sheet in data.sheet_names:
+            if sheet != 'APPS':
+                # Check if any failure in any previous schema scripts execution
+                if db_exec_success_status:
+                    print("Execution of scripts if any in " + sheet + " schema started.")
+                    rollback_dict[cr_name + "/" + sheet] = {}
+                    executed_command_dict[cr_name + "/" + sheet] = {}
+                else:
+                    break
+                # If no previous failure detected, proceed with each sheet -> scripts execution
+                path_of_execution = cr_db_folder_path + sheet
+                data_each_sheet = data.parse(sheet)
+                # Adding the username and password
+                username, password = get_schema_credentials(sheet)
+                for index, row in data_each_sheet.iterrows():
+                    # Blank or nan values check for DB queries
+                    if not pd.isnull(row['Values']) or row['Values'] == '':
+                        db_queries_to_execute = convert_to_list(row['Values'])
+                        if len(db_queries_to_execute) == 0:
+                            continue
+                        if not pd.isnull(row['Rollback_Details']) or row['Rollback_Details'] == '':
+                            rollback_scripts = convert_to_list(row['Rollback_Details'])
+                            if len(rollback_scripts) == 0:
+                                rollback_scripts = []
+                        else:
                             rollback_scripts = []
-                    else:
-                        rollback_scripts = []
-                    # Check for any previous failure for scripts execution
-                    if db_exec_success_status:
-                        db_exec_success_status, executed_command_dict, rollback_dict = db_commands_execution_each_row(
-                            db_queries_to_execute, rollback_scripts, path_of_execution,
-                            db_exec_success_status, rollback_dict, executed_command_dict, sheet)
-                    else:
-                        print("Scripts execution over.")
-                        break
-            if db_exec_success_status and sheet != 'APPS':
-                print("All scripts (if any) in " + sheet + " schema are successfully executed.")
+                        # Check for any previous failure for scripts execution
+                        if db_exec_success_status:
+                            db_exec_success_status, executed_command_dict, rollback_dict = db_commands_execution_each_row(
+                                db_queries_to_execute, rollback_scripts, path_of_execution,
+                                db_exec_success_status, rollback_dict, executed_command_dict, sheet)
+                        else:
+                            print("Scripts execution over.")
+                            break
+                if db_exec_success_status and sheet != 'APPS':
+                    print("All scripts (if any) in " + sheet + " schema are successfully executed.")
 
     # If no previous failures in db execution, compiling of forms or proc begins. Also check for invalid objects and compile invalid objects before deployment
     if db_exec_success_status:
@@ -723,15 +735,18 @@ for cr_name in cr_name_list:
         print("Compiling of files completed successfully.")
 
 if not db_exec_success_status:
-    # Rollback of entire CR if any of the above steps fail
-    print("Rollback started .........")
-    # Rollback of compile files
-    rollback_compiled_files(dict_of_files_compiled, cr_name, svn_trunk_folder,
-                            remote_server_compile_files_path_main_folder, timestamp)
-    # Rollback of DB
-    db_scripts_rollback(executed_command_dict, rollback_dict, db_exec_success_status)
+    if jenkins_file_present_status:
+        # Rollback of entire CR if any of the above steps fail
+        print("Rollback started .........")
+        # Rollback of compile files
+        rollback_compiled_files(dict_of_files_compiled, cr_name, svn_trunk_folder,
+                                remote_server_compile_files_path_main_folder, timestamp)
+        # Rollback of DB
+        db_scripts_rollback(executed_command_dict, rollback_dict, db_exec_success_status)
 
 if db_exec_success_status:
     print("Deployment over successfully.")
+else:
+    print("Deployment not over successfully.")
 
 ssh.close()
