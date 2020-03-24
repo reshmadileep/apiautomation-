@@ -6,7 +6,7 @@ from datetime import datetime
 from Database_Tasks import connect_to_db, disconnect_from_db, db_objects_create_backup
 import shutil
 
-#import config_PRE as config
+# import config_PRE as config
 
 # Importing the config based on environment to run
 if os.getenv("ENV_TO_DEPLOY") == 'SIT':
@@ -192,30 +192,23 @@ def get_list_of_files_compiled_of_each_file_type(compiling_completed_files_dicti
                 compiled_file_list_for_each_file_type = \
                     compiling_completed_files_dictionary[changerequest_name + "/APPS"]['proc']
     except Exception as e:
-        print("No files compiled of the type: "+filetype_for_compile)
+        print("No files compiled of the type: " + filetype_for_compile)
     finally:
         return compiled_file_list_for_each_file_type
 
 
-def rollback_files_steps(compiling_completed_files_dictionary, current_cr, backup_file_path,
+def rollback_files_steps(compiled_files_list, filetype_for_compile, backup_file_path,
                          remote_server_compile_files_path,
                          remote_server_bin_files_path, expected_output_after_compile_operation, timestamp):
-    # Initialization
-    filetype_for_compile = 'forms' if 'forms' in backup_file_path else 'proc'
-    # Get file list to compile
-    compiled_files_list = get_list_of_files_compiled_of_each_file_type(compiling_completed_files_dictionary,
-                                                                       filetype_for_compile, current_cr)
     # Reverse the list and process
-    if len(compiled_files_list) > 0:
-        compiled_files_list.reverse()
-    else:
+    if len(compiled_files_list) == 0:
         return
     # Rollback for proc or forms
     for compiled_file in compiled_files_list:
         copy_file_from_local_to_remote(ssh,
                                        backup_file_path + compiled_file,
                                        remote_server_compile_files_path + compiled_file)
-        out = compile_form(ssh, remote_server_compile_files_folder, compiled_file,
+        out = compile_form(ssh, remote_server_compile_files_path, compiled_file,
                            filetype_for_compile)
         if expected_output_after_compile_operation not in out:
             print(
@@ -230,9 +223,36 @@ def rollback_files_steps(compiling_completed_files_dictionary, current_cr, backu
                                 + " " + remote_server_bin_files_path +
                                 renamed_bin_file_name.split("." + timestamp)[0])
             execute_ssh_command(ssh,
-                                "mv " + remote_server_compile_files_path + renamed_compile_filename + " " + remote_server_compile_files_path + renamed_compile_filename.split("." + timestamp)[0])
+                                "mv " + remote_server_compile_files_path + renamed_compile_filename + " " + remote_server_compile_files_path +
+                                renamed_compile_filename.split("." + timestamp)[0])
         else:
             print("Compiling of back-up file " + compiled_file + " from trunk is successful.")
+
+
+def rollback_compiled_files(dictionary_of_files_compiled, changerequest_name, svn_trunk_folder_path,
+                            remote_server_compile_files_path_main_folder, timestamp):
+    dict_keys = list(dictionary_of_files_compiled[changerequest_name + '/APPS'].keys())
+    dict_keys.reverse()
+    for key in dict_keys:
+        dictionary_of_files_compiled[changerequest_name + '/APPS'][key].reverse()
+        # Get file list to compile
+        compiled_files_list = get_list_of_files_compiled_of_each_file_type(dictionary_of_files_compiled,
+                                                                           key, changerequest_name)
+        remote_server_compile_files_path, remote_server_compile_files_bin_path, expected_output = get_path_details_and_expected_output(
+            remote_server_compile_files_path_main_folder, key)
+        if key == 'forms':
+            rollback_files_steps(compiled_files_list, key,
+                                 svn_trunk_folder_path + "apps\\forms\\",
+                                 remote_server_compile_files_path,
+                                 remote_server_compile_files_bin_path, expected_output,
+                                 timestamp)
+        elif key == 'proc':
+            rollback_files_steps(compiled_files_list, key,
+                                 svn_trunk_folder_path + "batch\\proc\\",
+                                 remote_server_compile_files_path,
+                                 remote_server_compile_files_bin_path, expected_output,
+                                 timestamp)
+
 
 
 def get_schema_credentials(schema):
@@ -261,12 +281,12 @@ def get_query(query_type):
 def copy_file_from_local_to_remote(client, local_path, remote_path):
     try:
         print("copying " + local_path + " to " + remote_path)
-        sftp = ssh.open_sftp()
+        sftp = client.open_sftp()
         sftp.put(local_path, remote_path)
         sftp.close()
         print("copied")
     except Exception as e:
-        print("Error message while copying = " + str(e))
+        print("Restricted unwanted folder copy for path : " + local_path + " as only file copy to be done and not folder.")
 
 
 def delete_existing_remote_folder(path):
@@ -339,8 +359,7 @@ def extract_file_names_from_template_file_and_verify_if_files_present(file_prese
     return file_present_in_folder_status
 
 
-def check_if_jenkinsfile_contents_exist(data_in_jenkins_file):
-    file_present_in_folder_status = True
+def check_if_jenkinsfile_contents_exist(data_in_jenkins_file, file_present_in_folder_status):
     for sheet_name in data_in_jenkins_file.sheet_names:
         if not file_present_in_folder_status:
             break
@@ -579,8 +598,12 @@ for cr_name in cr_name_list:
     excel_file = svn_folder + "tags\\" + cr_name + '\\JenkinsTemplateFile.xlsx'
     data = pd.ExcelFile(excel_file)
     dict_of_files_compiled[cr_name + "/APPS"] = {}
+    # Check if Jenkins Template File Exists
+    if not os.path.exists(excel_file):
+        db_exec_success_status = False
+        print("Jenkins Template File not present in the path " + svn_cr_folder)
     # Check if files exist as in Jenkins File
-    db_exec_success_status = check_if_jenkinsfile_contents_exist(data)
+    db_exec_success_status = check_if_jenkinsfile_contents_exist(data, db_exec_success_status)
     if db_exec_success_status:
         print("All files in Jenkins Template file are present in the required folders.")
     # Copying files from Jenkins server to remote server. Also remove any files if any created in the previous run
@@ -668,7 +691,7 @@ for cr_name in cr_name_list:
                     output = compiling_files_steps(each_file, remote_server_compile_files_folder,
                                                    remote_server_compile_files_bin_folder,
                                                    svn_cr_folder + "\\apps\\forms\\", "fmx")
-                    # Storing renamed file names for back up purposes
+                    # Adding compiled files to dictionary
                     add_to_dictionary(cr_name + '/APPS', 'forms', each_file, dict_of_files_compiled)
                     if expected_output_after_compiling not in output:
                         print("Compiling of file " + each_file + " failed.")
@@ -681,7 +704,7 @@ for cr_name in cr_name_list:
                     output = compiling_files_steps(each_file, remote_server_compile_files_folder,
                                                    remote_server_compile_files_bin_folder,
                                                    svn_cr_folder + "\\batch\\proc\\", " ")
-                    # Storing renamed file names for back up purposes
+                    # Adding compiled files to dictionary
                     add_to_dictionary(cr_name + '/APPS', 'proc', each_file, dict_of_files_compiled)
                     if expected_output_after_compiling not in output:
                         print("Compiling of file " + each_file + " failed.")
@@ -701,22 +724,10 @@ for cr_name in cr_name_list:
 
 if not db_exec_success_status:
     # Rollback of entire CR if any of the above steps fail
-    # Rollback of proc
-    remote_server_compile_files_folder, remote_server_compile_files_bin_folder, expected_output_after_compiling = get_path_details_and_expected_output(
-        remote_server_compile_files_path_main_folder, 'proc')
-    rollback_files_steps(dict_of_files_compiled, cr_name,
-                         svn_trunk_folder + "batch\\proc\\",
-                         remote_server_compile_files_folder,
-                         remote_server_compile_files_bin_folder, expected_output_after_compiling,
-                         timestamp)
-    # Rollback of forms
-    remote_server_compile_files_folder, remote_server_compile_files_bin_folder, expected_output_after_compiling = get_path_details_and_expected_output(
-        remote_server_compile_files_path_main_folder, 'forms')
-    rollback_files_steps(dict_of_files_compiled, cr_name,
-                         svn_trunk_folder + "apps\\forms\\",
-                         remote_server_compile_files_folder,
-                         remote_server_compile_files_bin_folder, expected_output_after_compiling,
-                         timestamp)
+    print("Rollback started .........")
+    # Rollback of compile files
+    rollback_compiled_files(dict_of_files_compiled, cr_name, svn_trunk_folder,
+                            remote_server_compile_files_path_main_folder, timestamp)
     # Rollback of DB
     db_scripts_rollback(executed_command_dict, rollback_dict, db_exec_success_status)
 

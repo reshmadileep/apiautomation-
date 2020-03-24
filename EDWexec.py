@@ -3,7 +3,7 @@ import pandas as pd
 from paramiko import *
 import os
 from datetime import datetime
-import config_EDW_PRE as config
+# import config_EDW_PRE as config
 
 # Importing the config based on environment to run
 if os.getenv("ENV_TO_DEPLOY") == 'SIT':
@@ -54,11 +54,14 @@ def compile_file(client, compile_file_folder, file_name):
 
 
 def copy_file_from_local_to_remote(client, local_path, remote_path):
-    print("copying " + local_path + " to " + remote_path)
-    sftp = ssh.open_sftp()
-    sftp.put(local_path, remote_path)
-    sftp.close()
-    print("copied")
+    try:
+        print("copying " + local_path + " to " + remote_path)
+        sftp = client.open_sftp()
+        sftp.put(local_path, remote_path)
+        sftp.close()
+        print("copied")
+    except Exception as e:
+        print("Restricted unwanted folder copy for path : " + local_path + " as only file copy to be done and not folder.")
 
 
 def delete_existing_remote_folder(path):
@@ -116,10 +119,11 @@ def assign_permissions_to_files(client, path_of_files):
     return out
 
 
-def check_if_jenkinsfile_contents_exists(data_in_file):
-    file_present_in_folder_status = True
+def check_if_jenkinsfile_contents_exists(data_in_file, file_present_in_folder_status):
     files_to_install = []
     files_to_rollback = []
+    if not file_present_in_folder_status:
+        return file_present_in_folder_status, files_to_install, files_to_rollback
     data_to_compile_as_dataframe = pd.DataFrame(data_in_file, columns=['Values', 'Rollback_Details'])
     for index, row in data_to_compile_as_dataframe.iterrows():
         if not pd.isnull(row['Values']) or row['Values'] == '':
@@ -167,8 +171,8 @@ def copy_folder_and_files(client, changerequest_name):
                 continue
 
 
-# cr_name_list = os.getenv("CR_IDENTIFIER").split(',')
-cr_name_list = 'CHG0034741'.split(',')
+cr_name_list = os.getenv("CR_IDENTIFIER").split(',')
+# cr_name_list = 'CHG0034741'.split(',')
 svn_folder = ".\\svn\\EDW\\"
 timestamp = datetime.today().strftime('%Y-%m-%d-%H:%M:%S')
 ssh = SSHClient()
@@ -179,6 +183,7 @@ build_execution_status = True
 rollback_dict = {}
 files_executed_dict = {}
 remote_shell_scripts_deployment_path = '/djs/pre/bin'
+db_exec_success_status = True
 
 for cr_name in cr_name_list:
     print("Deployment started for CR: " + cr_name)
@@ -188,8 +193,13 @@ for cr_name in cr_name_list:
     excel_file = svn_folder + "tags\\" + cr_name + '\\JenkinsTemplateFile.xlsx'
     data = pd.ExcelFile(excel_file)
     data_sheet = data.parse('EDW')
+    # Check if Jenkins Template File Exists
+    if not os.path.exists(excel_file):
+        db_exec_success_status = False
+        print("Jenkins Template File not present in the path " + svn_cr_folder)
     # Checking if files in Jenkins Template file are present in local
-    file_present_status, list_to_install, files_to_backup = check_if_jenkinsfile_contents_exists(data_sheet)
+    file_present_status, list_to_install, files_to_backup = check_if_jenkinsfile_contents_exists(data_sheet,
+                                                                                                 db_exec_success_status)
     if file_present_status:
         rollback_dict = {cr_name: files_to_backup}
     else:
@@ -215,21 +225,22 @@ for cr_name in cr_name_list:
                 if "Install Failure     : 0" not in output:
                     print("Rollback starting due to some failure in build....")
                     build_execution_status = False
-                    for backup_cr_name in rollback_dict.keys():
-                        if rollback_dict[backup_cr_name] != "":
-                            for backup_file_to_compile in rollback_dict[backup_cr_name]:
-                                print("Compiling of back up for " + backup_cr_name + " started.")
-                                if backup_file_to_compile != "":
-                                    output = compile_file(ssh,
-                                                          cr_remote_deployment_path + backup_cr_name + "/deployment",
-                                                          backup_cr_name)
-                                    if "Install Failure     : 0" not in output:
-                                        print("Back up for CR " + backup_cr_name + " failed. Rollback process stopped.")
-                                        break
-                                else:
-                                    print(
-                                        "Back up file not available for CR " + backup_cr_name + ". Hence skipping backup for the same.")
-
+                    # for backup_cr_name in rollback_dict.keys():
+                    if len(rollback_dict[cr_name]) > 0:
+                        for backup_file_to_compile in rollback_dict[cr_name]:
+                            print("Compiling of back up for " + cr_name + " started.")
+                            if backup_file_to_compile != "":
+                                output = compile_file(ssh,
+                                                      cr_remote_deployment_path + cr_name + "/deployment",
+                                                      cr_name)
+                                if "Install Failure     : 0" not in output:
+                                    print("Back up for CR " + cr_name + " failed. Rollback process stopped.")
+                                    break
+                            else:
+                                print(
+                                    "Back up file not available for CR " + cr_name + ". Hence skipping backup for the same.")
+                    else:
+                        print("No backup available for CR:"+cr_name)
         # Check if any shell script to be executed.
     shell_files_list = os.listdir(svn_cr_folder + "\\unix\\shell")
     if len(shell_files_list) > 0 and build_execution_status:
@@ -243,7 +254,7 @@ for cr_name in cr_name_list:
                                                remote_shell_scripts_deployment_path + "/" + shell_script)
 
 if build_execution_status:
-    print("Jenkins execution over successfully in Pre.")
+    print("Deployment over successfully.")
 else:
-    print("Jenkins execution not over successfully in Pre.")
+    print("Deployment not over successfully.")
 ssh.close()
